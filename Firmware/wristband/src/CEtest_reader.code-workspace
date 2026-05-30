@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../CEtest_reader"
+		},
+		{
+			"name": "readertest",
+			"path": ".."
+		}
+	],
+	"settings": {}
+}

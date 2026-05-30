@@ -1,0 +1,43 @@
+!SESSION 2026-05-23 09:34:18.832 -----------------------------------------------
+eclipse.buildId=Version 1.19.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=macosx, ARCH=x86_64, WS=cocoa, NL=en_JP
+Framework arguments:  -keyring /Users/hideaki/.eclipse_keyring
+Command-line arguments:  -os macosx -ws cocoa -arch x86_64 -keyring /Users/hideaki/.eclipse_keyring -data /Users/hideaki/ISWC2026/Firmware
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 4 4 2026-05-23 09:34:30.588
+!MESSAGE CubeMX plugin appears to be active, Log4j initialization might be too late.
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2026-05-23 09:34:30.590
+!MESSAGE Log4j2 initialized with config file /Users/hideaki/ISWC2026/Firmware/.metadata/.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2026-05-23 09:34:35.411
+!MESSAGE Started RMI Server, listening on port 41340
+
+!ENTRY org.eclipse.cdt.core 1 0 2026-05-23 09:35:48.782
+!MESSAGE Indexed 'U375KGU6_ICM45605_filter' (33 sources, 142 headers) in 10.1 sec: 20,443 declarations; 90,063 references; 1 unresolved inclusions; 120 syntax errors; 251 unresolved names (0.23%)
+
+!ENTRY org.eclipse.cdt.core 1 0 2026-05-23 09:39:45.538
+!MESSAGE Indexed 'ring' (33 sources, 142 headers) in 4.44 sec: 20,443 declarations; 90,063 references; 1 unresolved inclusions; 120 syntax errors; 251 unresolved names (0.23%)
+
+!ENTRY org.eclipse.core.resources 2 2 2026-05-23 09:45:12.055
+!MESSAGE Save operation warnings.
+!SUBENTRY 1 org.eclipse.core.resources 2 234 2026-05-23 09:45:12.056
+!MESSAGE The project description file (.project) for 'ring' was missing.  This file contains important information about the project.  A new project description file has been created, but some information about the project may have been lost.
+
+!ENTRY org.eclipse.cdt.core 1 0 2026-05-23 09:47:48.402
+!MESSAGE Indexed 'ring' (33 sources, 142 headers) in 3.88 sec: 20,442 declarations; 90,062 references; 1 unresolved inclusions; 120 syntax errors; 251 unresolved names (0.23%)
+!SESSION 2026-05-30 17:18:45.464 -----------------------------------------------
+eclipse.buildId=Version 1.19.0
+java.version=21.0.3
+java.vendor=Eclipse Adoptium
+BootLoader constants: OS=macosx, ARCH=x86_64, WS=cocoa, NL=en_JP
+Framework arguments:  -keyring /Users/hideaki/.eclipse_keyring
+Command-line arguments:  -os macosx -ws cocoa -arch x86_64 -keyring /Users/hideaki/.eclipse_keyring
+
+!ENTRY com.st.stm32cube.ide.mcu.informationcenter 1 1 2026-05-30 17:18:57.467
+!MESSAGE Log4j2 initialized with config file /Users/hideaki/ISWC2026/Firmware/.metadata/.log4j2.xml
+
+!ENTRY com.st.stm32cube.ide.mcu.ide 1 1 2026-05-30 17:19:11.762
+!MESSAGE Started RMI Server, listening on port 41337

@@ -1,0 +1,16 @@
+# Python
+**/__pycache__/
+*.pyc
+
+# C/C++ Build artifacts
+**/Debug/
+*.o
+*.d
+*.su
+*.cyclo
+*.elf
+*.map
+*.list
+
+# OS generated files
+.DS_Store

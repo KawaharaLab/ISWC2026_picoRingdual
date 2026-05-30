@@ -1,0 +1,14 @@
+09:47:54 **** Build of configuration Debug for project ring ****
+make -j7 all 
+arm-none-eabi-gcc "../Core/Src/main.c" -mcpu=cortex-m33 -std=gnu11 -g3 -DDEBUG -DUSE_HAL_DRIVER -DSTM32U375xx -c -I../Core/Inc -I../Drivers/STM32U3xx_HAL_Driver/Inc -I../Drivers/STM32U3xx_HAL_Driver/Inc/Legacy -I../Drivers/CMSIS/Device/ST/STM32U3xx/Include -I../Drivers/CMSIS/Include -I../NFC7 -I../NFC7/Target -I../Drivers/BSP/Components/st25dvxxkc -O0 -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -MMD -MP -MF"Core/Src/main.d" -MT"Core/Src/main.o" --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -o "Core/Src/main.o"
+arm-none-eabi-gcc -o "ring.elf" @"objects.list"   -mcpu=cortex-m33 -T"/Users/hideaki/ISWC2026/Firmware/ring/STM32U375KGUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="ring.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv5-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+Finished building target: ring.elf
+ 
+arm-none-eabi-size  ring.elf 
+arm-none-eabi-objdump -h -S ring.elf  > "ring.list"
+   text	   data	    bss	    dec	    hex	filename
+  43016	    524	   2244	  45784	   b2d8	ring.elf
+Finished building: default.size.stdout
+ 
+Finished building: ring.list
+ 

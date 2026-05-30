@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Demo - Gesture Control Landscape</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- React & ReactDOM -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #020617; color: #e2e8f0; margin: 0; overflow: hidden; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        @keyframes pulse-blue {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-slow {
+            animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // アイコンコンポーネント
+        const Icon = ({ name, className = "w-5 h-5" }) => {
+            useEffect(() => {
+                if (window.lucide) {
+                    window.lucide.createIcons();
+                }
+            }, [name]);
+            return <i data-lucide={name} className={className}></i>;
+        };
+
+        const App = () => {
+            const [view, setView] = useState('setup'); // 'setup', 'locked', 'main', 'sent'
+            const [serialActive, setSerialActive] = useState(false);
+            const [hasNotification, setHasNotification] = useState(false);
+            const [selectedIndex, setSelectedIndex] = useState(0);
+            const [selectedReplyIndex, setSelectedReplyIndex] = useState(1);
+            const [serialDebugLine, setSerialDebugLine] = useState("Waiting for serial input...");
+            const [serialDebugAction, setSerialDebugAction] = useState("-");
+            
+            const detailScrollRef = useRef(null);
+            const inboxScrollRef = useRef(null);
+            const lastIMU = useRef({ qw: 0, qx: 0, qy: 0, qz: 0 });
+            const lastGpio = useRef(0);
+            const lastActionAtRef = useRef(0);
+            const serialLockedKeyRef = useRef(null);
+            const serialKeyHistoryRef = useRef([]);
+            const serialSpaceArmedRef = useRef(true);
+            const movementThreshold = 0.15;
+            const ACTION_COOLDOWN_MS = 150;
+            const SCROLL_STEP = 200;
+
+            const [emails, setEmails] = useState([
+                {
+                    id: 1,
+                    sender: "Alex Rivers",
+                    subject: "Project Sync: Q3 Roadmap & Technical Requirements",
+                    preview: "Hi there, I've updated the roadmap for Q3 based on our discussion...",
+                    content: "Hi Team,\n\nI've updated the Q3 Roadmap. Key milestones:\n\n1. API Integration: Finalize auth by July 15th for the frontend team.\n2. Beta Feedback: Expect user testing results on Aug 10th for rapid iteration.\n3. Production Release: Aiming for Sept 30th, including a 2-week QA buffer.\n\nPlease review the attached specs and provide sign-off by EOD tomorrow.\n\nBest,\nAlex Rivers\nLead Project Manager",
+                    time: "Just Now",
+                    isRead: false,
+                    avatar: "A",
+                    avatarColor: "bg-indigo-600"
+                },
+                {
+                    id: 2,
+                    sender: "Stripe Support",
+                    subject: "Important: Updated Subscription Terms for Q3",
+                    preview: "We're reaching out to notify you of some upcoming changes to your billing...",
+                    content: "Hello,\n\nWe are writing to inform you that your monthly billing statement for the period of June 1 - June 30 is now available in your account dashboard. \n\nPlease note that starting next month, we will be adjusting our service terms to better reflect the new enterprise features we've introduced, including the advanced security dashboard and the expanded API rate limits.\n\nTotal Amount Charged: $299.00\nPayment Method: Visa ending in 4242\nStatus: Paid Successfully\n\nYou can download a PDF version of this invoice for your tax records directly from the 'Billing History' section of your settings. If you have any questions regarding these changes or your current plan, please don't hesitate to reach out to our dedicated support team.\n\nThank you for choosing Stripe.",
+                    time: "2h ago",
+                    isRead: true,
+                    avatar: "S",
+                    avatarColor: "bg-emerald-600"
+                },
+                {
+                    id: 3,
+                    sender: "GitHub Security",
+                    subject: "[Security Update] New login detected on your account",
+                    preview: "A new login was detected from a Chrome browser on a Linux device in Tokyo...",
+                    content: "Hey there,\n\nThis is an automated security notification from GitHub. A new login was detected for your account 'dev-user-99' using a Chrome browser on a Linux workstation.\n\nLocation: Minato-ku, Tokyo, Japan\nIP Address: 192.168.1.104\nTime: May 8, 2024 at 10:42 PM JST\n\nIf this was you, you can safely ignore this email. However, if you do not recognize this activity, we strongly recommend that you take the following actions immediately:\n\n1. Change your password to something unique and strong.\n2. Review your personal access tokens and active SSH keys.\n3. Enable Two-Factor Authentication (2FA) if you haven't already.\n\nSecurity is our top priority. If you need assistance, please visit the GitHub Help Center or contact our security response team.\n\nBest,\nThe GitHub Security Team",
+                    time: "Yesterday",
+                    isRead: true,
+                    avatar: "G",
+                    avatarColor: "bg-slate-700"
+                }
+            ]);
+
+            const replyOptions = [
+                { id: 0, text: "Looks good! Proceed.", icon: "check-circle" },
+                { id: 1, text: "Check schedule first.", icon: "clock" },
+                { id: 2, text: "Let's call to discuss.", icon: "phone" }
+            ];
+
+            // --- Serial Connection Logic ---
+            const connectSerial = async () => {
+                try {
+                    const port = await navigator.serial.requestPort();
+                    await port.open({ baudRate: 115200 });
+                    setSerialActive(true);
+                    setView('locked');
+                    
+                    const reader = port.readable.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = "";
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value);
+                        let lines = buffer.split(/\r?\n/);
+                        buffer = lines.pop();
+                        for (let line of lines) {
+                            handleSerialLine(line.trim());
+                        }
+                    }
+                } catch (e) {
+                    console.error("Serial Error:", e);
+                }
+            };
+
+            const handleSerialLine = (line) => {
+                if (!line) return;
+                setSerialDebugLine(line);
+                if (line.startsWith("IMU:")) {
+                    handleIMUData(line);
+                    return;
+                }
+                const normalized = line.toLowerCase();
+                if (["w", "a", "s", "d", "space"].includes(normalized)) {
+                    dispatchControlInput(normalized);
+                }
+            };
+
+            const handleIMUData = (line) => {
+                const parts = line.split(":")[1].split(",");
+                if (parts.length < 5) return;
+                const qw = parseFloat(parts[0]), qx = parseFloat(parts[1]), qy = parseFloat(parts[2]), qz = parseFloat(parts[3]);
+                const delta = Math.sqrt(Math.pow(qw-lastIMU.current.qw,2)+Math.pow(qx-lastIMU.current.qx,2)+Math.pow(qy-lastIMU.current.qy,2)+Math.pow(qz-lastIMU.current.qz,2));
+                
+                if (delta > movementThreshold) {
+                    if (view === 'locked') setView('main');
+                    else if (view === 'main') handleReply();
+                }
+
+                const gpio = parseInt(parts[4]);
+                if (!isNaN(gpio)) {
+                    const changed = gpio & ~lastGpio.current;
+                    if (changed & 0x01) dispatchControlInput('w');
+                    if (changed & 0x02) dispatchControlInput('a');
+                    if (changed & 0x04) dispatchControlInput('s');
+                    if (changed & 0x08) dispatchControlInput('d');
+                    if (changed & 0x10) dispatchControlInput('space');
+                    lastGpio.current = gpio;
+                }
+                lastIMU.current = { qw, qx, qy, qz };
+            };
+
+            const dispatchControlInput = (key) => {
+                const now = Date.now();
+                if (now - lastActionAtRef.current < ACTION_COOLDOWN_MS) return;
+                lastActionAtRef.current = now;
+                setSerialDebugAction(key.toUpperCase());
+                handleControlLogic(key);
+            };
+
+            const handleControlLogic = (key) => {
+                if (view === 'locked') {
+                    if (key === 'space' || key === 'enter') setView('main');
+                    return;
+                }
+
+                if (view === 'main') {
+                    if (key === 'w') setSelectedIndex(p => Math.max(0, p - 1));
+                    if (key === 's') setSelectedIndex(p => Math.min(emails.length - 1, p + 1));
+                    if (key === 'a') setSelectedReplyIndex(p => Math.max(0, p - 1));
+                    if (key === 'd') setSelectedReplyIndex(p => Math.min(replyOptions.length - 1, p + 1));
+                    
+                    if (key === 'space' || key === 'enter') {
+                        handleReply();
+                    }
+
+                    // スクロール制御 (メール本文用)
+                    if (detailScrollRef.current) {
+                        if (key === 'w' && selectedIndex === 0) detailScrollRef.current.scrollBy({ top: -SCROLL_STEP, behavior: 'smooth' });
+                        if (key === 's' && selectedIndex === emails.length - 1) detailScrollRef.current.scrollBy({ top: SCROLL_STEP, behavior: 'smooth' });
+                    }
+                }
+            };
+
+            const handleReply = () => {
+                setView('sent');
+                setTimeout(() => setView('main'), 2000);
+            };
+
+            useEffect(() => {
+                const handleKey = (e) => {
+                    const k = e.key.toLowerCase();
+                    const map = { " ": "space", "arrowup": "w", "arrowdown": "s", "arrowleft": "a", "arrowright": "d", "enter": "enter" };
+                    if (map[k]) {
+                        e.preventDefault();
+                        dispatchControlInput(map[k]);
+                    } else if (["w", "a", "s", "d"].includes(k)) {
+                        dispatchControlInput(k);
+                    }
+                };
+                window.addEventListener('keydown', handleKey);
+                return () => window.removeEventListener('keydown', handleKey);
+            }, [view, selectedIndex, selectedReplyIndex]);
+
+            useEffect(() => {
+                if (view === 'locked') {
+                    setTimeout(() => setHasNotification(true), 1000);
+                }
+            }, [view]);
+
+            // 自動既読処理
+            useEffect(() => {
+                if (view === 'main') {
+                    setEmails(prev => prev.map((e, i) => i === selectedIndex ? { ...e, isRead: true } : e));
+                }
+            }, [selectedIndex, view]);
+
+            return (
+                <div className="flex h-screen w-full bg-slate-950 overflow-hidden text-slate-200">
+                    
+                    {/* デバッグオーバーレイ */}
+                    <div className="fixed right-6 top-6 z-[100] bg-black/60 backdrop-blur-md border border-slate-700/50 rounded-xl p-3 w-64 shadow-2xl pointer-events-none">
+                        <div className="text-[10px] font-bold text-cyan-400 uppercase tracking-widest mb-1">System Status</div>
+                        <div className="text-[10px] font-mono text-slate-300 truncate">RAW: {serialDebugLine}</div>
+                        <div className="text-[10px] font-mono text-emerald-400 mt-1">LAST ACTION: {serialDebugAction}</div>
+                    </div>
+
+                    {/* セットアップ画面 */}
+                    {view === 'setup' && (
+                        <div className="absolute inset-0 z-[80] bg-slate-950 flex flex-col items-center justify-center p-8 animate-in fade-in duration-500">
+                            <div className="w-24 h-24 bg-blue-600/20 rounded-3xl flex items-center justify-center mb-8 border border-blue-500/30">
+                                <Icon name="cpu" className="w-12 h-12 text-blue-500" />
+                            </div>
+                            <h2 className="text-3xl font-black mb-4 text-white">Gesture Interface</h2>
+                            <p className="text-slate-400 text-center max-w-sm mb-10">デバイスを接続して、ジェスチャーによるハンズフリー操作を開始します。</p>
+                            <button onClick={connectSerial} className="px-10 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold transition-all shadow-xl shadow-blue-900/20">シリアルポート接続</button>
+                        </div>
+                    )}
+
+                    {/* ロック画面 (横長版) */}
+                    {view === 'locked' && (
+                        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 text-center">
+                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-blue-900/20 via-transparent to-transparent opacity-50"></div>
+                            <div className="text-8xl font-thin text-white mb-4">09:41</div>
+                            <div className="text-xl text-slate-400 tracking-[0.3em] uppercase mb-16">May 8th Friday</div>
+                            
+                            {hasNotification && (
+                                <div className="w-full max-w-xl animate-in slide-in-from-bottom-10 duration-700 ease-out">
+                                    <div className="bg-slate-900/80 backdrop-blur-2xl p-6 rounded-3xl border border-white/10 shadow-2xl flex items-center gap-6 text-left">
+                                        <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center shrink-0">
+                                            <Icon name="mail" className="w-8 h-8 text-white" />
+                                        </div>
+                                        <div className="flex-1">
+                                            <div className="flex justify-between items-center mb-1">
+                                                <span className="text-xs font-bold text-blue-400 tracking-widest uppercase">New Message</span>
+                                                <span className="text-[10px] text-slate-500 font-bold uppercase">Now</span>
+                                            </div>
+                                            <div className="text-lg font-bold text-white">Alex Rivers</div>
+                                            <div className="text-sm text-slate-400 line-clamp-1">Project Sync: Q3 Roadmap & Technical Requirements</div>
+                                        </div>
+                                        <div className="px-4 py-2 border border-blue-500/30 rounded-xl text-[10px] font-bold text-blue-400 animate-pulse">
+                                            SPACE TO OPEN
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* メイン ランドスケープ レイアウト */}
+                    {(view === 'main' || view === 'sent') && (
+                        <div className="flex w-full h-full animate-in fade-in duration-500">
+                            
+                            {/* 左サイドナビゲーション */}
+                            <nav className="w-20 bg-slate-900/50 border-right border-slate-800 flex flex-col items-center py-8 gap-10 shrink-0">
+                                <div className="w-12 h-12 bg-blue-600 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-900/40">
+                                    <Icon name="mail" className="w-6 h-6 text-white" />
+                                </div>
+                                <div className="flex flex-col gap-8 text-slate-600">
+                                    <Icon name="calendar" className="w-6 h-6 hover:text-slate-400 transition-colors cursor-pointer" />
+                                    <Icon name="users" className="w-6 h-6 hover:text-slate-400 transition-colors cursor-pointer" />
+                                    <Icon name="settings" className="w-6 h-6 hover:text-slate-400 transition-colors cursor-pointer" />
+                                </div>
+                                <div className="mt-auto w-10 h-10 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center font-bold text-[10px]">JD</div>
+                            </nav>
+
+                            {/* メール一覧ペイン */}
+                            <aside className="w-96 bg-slate-900/30 border-r border-slate-800 flex flex-col shrink-0">
+                                <div className="p-6 border-b border-slate-800">
+                                    <h1 className="text-2xl font-black text-white flex items-center gap-3">
+                                        Inbox <span className="text-xs bg-blue-600 px-2 py-0.5 rounded-full font-bold">3</span>
+                                    </h1>
+                                </div>
+                                <div className="flex-1 overflow-y-auto no-scrollbar">
+                                    {emails.map((e, i) => (
+                                        <div 
+                                            key={e.id}
+                                            onClick={() => setSelectedIndex(i)}
+                                            className={`p-6 border-b border-slate-800/50 transition-all cursor-pointer relative ${selectedIndex === i ? 'bg-blue-600/10 border-l-4 border-l-blue-500' : 'hover:bg-slate-800/30 border-l-4 border-l-transparent'}`}
+                                        >
+                                            <div className="flex gap-4">
+                                                <div className={`w-10 h-10 rounded-xl ${e.avatarColor} flex items-center justify-center text-white font-bold shrink-0 shadow-lg`}>
+                                                    {e.avatar}
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex justify-between items-start mb-1">
+                                                        <span className={`text-sm truncate ${!e.isRead ? 'text-white font-black' : 'text-slate-400'}`}>{e.sender}</span>
+                                                        <span className="text-[10px] text-slate-500 font-bold">{e.time}</span>
+                                                    </div>
+                                                    <div className={`text-xs truncate mb-2 ${!e.isRead ? 'text-slate-200 font-bold' : 'text-slate-500'}`}>{e.subject}</div>
+                                                    <div className="text-[11px] text-slate-500 line-clamp-1 italic">{e.preview}</div>
+                                                </div>
+                                            </div>
+                                            {!e.isRead && <div className="absolute top-6 right-4 w-2 h-2 bg-blue-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(59,130,246,0.8)]"></div>}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="p-4 bg-slate-900/50 border-t border-slate-800 text-center">
+                                    <p className="text-[10px] font-bold text-slate-500 tracking-widest uppercase">W / S to Navigate</p>
+                                </div>
+                            </aside>
+
+                            {/* メール詳細ペイン */}
+                            <main className="flex-1 flex flex-col relative bg-slate-950/50">
+                                {view === 'sent' ? (
+                                    <div className="absolute inset-0 z-20 bg-slate-950 flex flex-col items-center justify-center text-center animate-in zoom-in duration-300">
+                                        <div className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 border border-emerald-500/20 shadow-[0_0_50px_rgba(16,185,129,0.1)]">
+                                            <Icon name="send" className="w-10 h-10 text-emerald-500" />
+                                        </div>
+                                        <h2 className="text-3xl font-black text-white uppercase tracking-tight mb-2">Message Sent</h2>
+                                        <p className="text-slate-500 font-medium italic">Your gesture response has been delivered.</p>
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div ref={detailScrollRef} className="flex-1 overflow-y-auto p-12 no-scrollbar">
+                                            <div className="max-w-3xl mx-auto">
+                                                <div className="flex justify-between items-start mb-10">
+                                                    <div>
+                                                        <h2 className="text-3xl font-black text-white mb-4 leading-tight">{emails[selectedIndex].subject}</h2>
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-10 h-10 rounded-xl ${emails[selectedIndex].avatarColor} flex items-center justify-center text-white font-bold`}>
+                                                                {emails[selectedIndex].avatar}
+                                                            </div>
+                                                            <div>
+                                                                <div className="text-sm font-bold text-white">{emails[selectedIndex].sender}</div>
+                                                                <div className="text-[11px] text-slate-500 font-mono italic">to: user@platform.design</div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-sm text-slate-500 font-bold uppercase tracking-widest">{emails[selectedIndex].time}</div>
+                                                </div>
+                                                
+                                                <div className="text-lg text-slate-300 leading-relaxed whitespace-pre-wrap font-medium border-l-2 border-slate-800 pl-8 ml-1">
+                                                    {emails[selectedIndex].content}
+                                                </div>
+
+                                                <div className="mt-20 py-10 border-t border-slate-900 text-center">
+                                                    <span className="text-[10px] font-bold text-slate-700 tracking-[0.5em] uppercase">End of transmission</span>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        {/* クイック返信バー (横並び) */}
+                                        <div className="p-8 bg-gradient-to-t from-slate-950 via-slate-950 to-transparent border-t border-white/5">
+                                            <div className="max-w-3xl mx-auto">
+                                                <div className="flex items-center justify-between mb-6">
+                                                    <h4 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">Quick Gestures</h4>
+                                                    <div className="text-[10px] font-bold text-blue-500 flex items-center gap-2">
+                                                        <Icon name="info" className="w-3 h-3" /> A / D to select • SPACE to send
+                                                    </div>
+                                                </div>
+                                                <div className="flex gap-4">
+                                                    {replyOptions.map((opt, i) => (
+                                                        <div 
+                                                            key={opt.id}
+                                                            className={`flex-1 flex flex-col items-center justify-center p-6 rounded-2xl border-2 transition-all duration-300 gap-3
+                                                                ${selectedReplyIndex === i 
+                                                                    ? 'bg-blue-600 border-blue-400 text-white scale-105 shadow-2xl shadow-blue-900/40 z-10' 
+                                                                    : 'bg-slate-900/50 border-slate-800 text-slate-500 opacity-60 scale-95'}
+                                                            `}
+                                                        >
+                                                            <Icon name={opt.icon} className={`w-6 h-6 ${selectedReplyIndex === i ? 'text-white' : 'text-slate-700'}`} />
+                                                            <span className="text-xs font-black uppercase text-center leading-tight">{opt.text}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </>
+                                )}
+                            </main>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

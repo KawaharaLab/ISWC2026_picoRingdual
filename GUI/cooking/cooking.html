@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FRY-MONITOR Stir-Fry Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes shake {
+            0% { transform: translate(1px, 1px) rotate(0deg); }
+            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+            20% { transform: translate(-3px, 0px) rotate(1deg); }
+            30% { transform: translate(3px, 2px) rotate(0deg); }
+            40% { transform: translate(1px, -1px) rotate(1deg); }
+            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+            60% { transform: translate(-3px, 1px) rotate(0deg); }
+            70% { transform: translate(3px, 1px) rotate(-1deg); }
+            80% { transform: translate(-1px, -1px) rotate(1deg); }
+            90% { transform: translate(1px, 2px) rotate(0deg); }
+            100% { transform: translate(1px, -2px) rotate(-1deg); }
+        }
+        .shake {
+            animation: shake 0.15s infinite;
+        }
+        .pan-container {
+            transition: transform 0.1s ease-out;
+            position: relative;
+        }
+        .smoke {
+            position: absolute;
+            top: -60px;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+            transition: opacity 0.5s;
+            font-size: 4rem;
+            pointer-events: none;
+        }
+        .burning {
+            opacity: 1 !important;
+            animation: float-up 1.5s infinite linear;
+        }
+        @keyframes float-up {
+            0% { transform: translate(-50%, 0); opacity: 0; }
+            50% { opacity: 0.8; }
+            100% { transform: translate(-50%, -100px); opacity: 0; }
+        }
+        .veggie {
+            transition: transform 0.1s;
+        }
+        .tossing .veggie {
+            transform: translateY(-50px) rotate(15deg);
+        }
+        #debug-serial-console {
+            font-family: monospace;
+            font-size: 10px;
+            line-height: 1.4;
+        }
+        input[type=range] {
+            accent-color: #fbbf24;
+        }
+        canvas {
+            image-rendering: pixelated;
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white min-h-screen font-sans overflow-hidden">
+
+    <!-- Step 1: device pairing only (same document so Web Serial port stays valid) -->
+    <div id="screen-setup" class="flex h-screen w-full flex-col items-center justify-center gap-8 p-8">
+        <div class="text-center space-y-2">
+            <h1 class="text-4xl font-black tracking-tighter text-yellow-400">FRY-MONITOR</h1>
+            <p class="text-sm text-slate-400 max-w-md">シリアルデバイスを選ぶと、フライパンとグラフのモニタ画面に進みます。</p>
+        </div>
+        <button id="connect-btn" type="button" class="min-w-[280px] px-8 py-4 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm font-bold transition-all border border-slate-500 shadow-xl active:scale-95">
+            CONNECT DEVICE
+        </button>
+        <p id="setup-error" class="hidden max-w-md text-center text-sm text-red-400" role="alert"></p>
+    </div>
+
+    <!-- Step 2: graph + pan (shown after serial is open) -->
+    <div id="screen-monitor" class="hidden h-screen w-full">
+        
+        <!-- LEFT SIDEBAR: Controls & Graph -->
+        <div class="w-1/3 min-w-[320px] bg-slate-800/50 border-r border-slate-700 p-6 flex flex-col gap-6 z-20 backdrop-blur-md">
+            <div>
+                <h1 class="text-3xl font-black tracking-tighter text-yellow-400">FRY-MONITOR</h1>
+                <p hidden class="text-[10px] text-slate-400 font-bold uppercase tracking-widest mt-1">Professional Stir-Fry Analytics</p>
+            </div>
+            
+            <!-- IMU Visualization Graph -->
+            <div class="bg-black/60 p-4 rounded-xl border border-slate-700 shadow-2xl">
+                <div class="flex justify-between items-center mb-3">
+                    <span class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">IMU Delta Movement</span>
+                    <span id="delta-val" class="text-xs font-mono text-cyan-400">0.000</span>
+                </div>
+                <div class="relative w-full h-96 bg-black/40 rounded border border-slate-800 overflow-hidden mb-4">
+                    <canvas id="imu-chart" class="w-full h-full"></canvas>
+                </div>
+
+                <div class="flex justify-between items-center mb-2">
+                    <span class="text-[10px] font-bold text-slate-400 tracking-widest uppercase">Toss Sensitivity</span>
+                    <span id="threshold-val" class="text-xs font-mono text-red-400">0.05</span>
+                </div>
+                <input type="range" id="threshold-slider" min="0.01" max="0.30" step="0.005" value="0.05" class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer">
+                <p class="text-[9px] text-slate-500 mt-2 italic text-center">Movement above red line triggers cooling</p>
+            </div>
+
+            <!-- Debug Console -->
+            <div hidden class="bg-black/30 p-4 rounded-xl border border-slate-800 mt-auto">
+                <div class="text-[10px] text-slate-400 uppercase font-bold mb-2 border-b border-slate-800 pb-1 flex justify-between">
+                    <span>Serial Monitor</span>
+                    <span id="data-counter" class="text-cyan-400">0 pkts</span>
+                </div>
+                <div id="debug-serial-console" class="text-emerald-400 truncate h-4 mb-1 text-[10px]">Waiting for device...</div>
+                <div id="debug-raw-line" class="text-slate-500 text-[9px] truncate opacity-60 font-mono">No data incoming.</div>
+            </div>
+        </div>
+
+        <!-- RIGHT SIDE: Game Area -->
+        <div class="flex-1 relative flex flex-col items-center justify-center bg-slate-900 p-12">
+            
+            <!-- Status Header (Top Right) -->
+            <div class="absolute top-8 right-8 text-right">
+                <div id="status-badge" class="px-8 py-3 rounded-full text-xl font-black bg-green-500 shadow-2xl shadow-green-500/20 transition-all duration-300">PERFECT</div>
+                <div hidden class="text-6xl font-mono mt-4 tabular-nums text-slate-400 opacity-50" id="timer-display">00:00</div>
+            </div>
+
+            <!-- Simulation Rendering -->
+            <div class="relative flex flex-col items-center transform scale-125">
+                <!-- Smoke Effects -->
+                <div id="smoke-1" class="smoke">💨</div>
+                <div id="smoke-2" class="smoke" style="margin-left: 40px;">💨</div>
+                
+                <!-- Pan Illustration -->
+                <div id="pan-wrapper" class="pan-container mb-16 select-none scale-[1.5]">
+                    <svg width="240" height="180" viewBox="0 0 240 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="160" y="85" width="80" height="14" rx="7" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+                        <path d="M20 80C20 115 55 145 100 145C145 145 180 115 180 80H20Z" fill="#111827" stroke="#475569" stroke-width="5"/>
+                        <path d="M30 85C30 110 60 130 100 130C140 130 170 110 170 85" stroke="#1f2937" stroke-width="3" stroke-linecap="round"/>
+                        <g id="veggies">
+                            <rect class="veggie" x="50" y="70" width="30" height="10" rx="2" fill="#fb923c" transform="rotate(-15 50 70)"/>
+                            <circle class="veggie" cx="90" cy="75" r="12" fill="#4ade80" />
+                            <circle class="veggie" cx="130" cy="72" r="10" fill="#f1f5f9" />
+                            <rect class="veggie" x="100" y="90" width="25" height="14" rx="3" fill="#94a3b8" />
+                            <path class="veggie" d="M60 95 L80 95 L75 110 L55 110 Z" fill="#22c55e" transform="rotate(10 60 95)"/>
+                        </g>
+                    </svg>
+                </div>
+
+                <!-- Temperature Gauge -->
+                <div class="relative w-[450px]">
+                    <div class="w-full h-10 bg-slate-800/80 rounded-2xl overflow-hidden border-4 border-slate-700 shadow-2xl backdrop-blur-sm">
+                        <div id="temp-bar" class="h-full bg-cyan-400 transition-all duration-150 relative" style="width: 0%">
+                            <div class="absolute top-0 left-0 w-full h-1/3 bg-white/10"></div>
+                        </div>
+                    </div>
+                    <div class="flex justify-between w-full mt-4 px-2 text-xs font-black uppercase tracking-[0.2em] text-slate-500">
+                        <span class="flex items-center gap-2"><div class="w-2 h-2 rounded-full bg-cyan-400"></div> Sizzling</span>
+                        <span id="warning-text" class="transition-colors">Smoking Hot</span>
+                        <span class="flex items-center gap-2">Danger <div class="w-2 h-2 rounded-full bg-red-600"></div></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- UI Interaction Overlay -->
+            <div id="warning-overlay" class="hidden absolute inset-0 bg-red-950/40 flex items-center justify-center pointer-events-none backdrop-blur-[1px] z-50">
+                <div class="text-8xl font-black text-white italic animate-bounce tracking-tighter drop-shadow-[0_10px_10px_rgba(0,0,0,0.5)] text-center">
+                    BURNING!
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let temperature = 0;
+        let startTime = Date.now();
+        const panWrapper = document.getElementById('pan-wrapper');
+        const tempBar = document.getElementById('temp-bar');
+        const statusBadge = document.getElementById('status-badge');
+        const warningOverlay = document.getElementById('warning-overlay');
+        const timerDisplay = document.getElementById('timer-display');
+        const smoke1 = document.getElementById('smoke-1');
+        const smoke2 = document.getElementById('smoke-2');
+        const warningText = document.getElementById('warning-text');
+        const debugConsole = document.getElementById('debug-serial-console');
+        const debugRawLine = document.getElementById('debug-raw-line');
+        const dataCounterEl = document.getElementById('data-counter');
+        const thresholdSlider = document.getElementById('threshold-slider');
+        const thresholdVal = document.getElementById('threshold-val');
+        const deltaValEl = document.getElementById('delta-val');
+        
+        // Canvas Setup
+        const canvas = document.getElementById('imu-chart');
+        const ctx = canvas.getContext('2d');
+        let history = new Array(100).fill(0);
+        let movementThreshold = 0.05; 
+        let packetCount = 0;
+
+        function resizeCanvas() {
+            if (!canvas.parentElement) return;
+            const w = canvas.parentElement.clientWidth;
+            const h = canvas.parentElement.clientHeight;
+            if (w < 2 || h < 2) return;
+            canvas.width = w;
+            canvas.height = h;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        function revealMonitor() {
+            document.getElementById('screen-setup').classList.add('hidden');
+            const mon = document.getElementById('screen-monitor');
+            mon.classList.remove('hidden');
+            mon.classList.add('flex');
+            temperature = 0;
+            startTime = Date.now();
+            history = new Array(100).fill(0);
+            lastQw = lastQx = lastQy = lastQz = 0;
+            packetCount = 0;
+            if (dataCounterEl) dataCounterEl.innerText = '0 pkts';
+            if (deltaValEl) deltaValEl.innerText = '0.000';
+            requestAnimationFrame(() => {
+                resizeCanvas();
+                requestAnimationFrame(resizeCanvas);
+            });
+        }
+
+        thresholdSlider.addEventListener('input', (e) => {
+            movementThreshold = parseFloat(e.target.value);
+            thresholdVal.innerText = movementThreshold.toFixed(3);
+        });
+
+        function triggerToss() {
+            temperature = Math.max(0, temperature - 10.0);
+            
+            panWrapper.classList.add('shake', 'tossing');
+            panWrapper.style.transform = `scale(1.5) translateY(-30px) rotate(${Math.random() > 0.5 ? -6 : 6}deg)`;
+            
+            setTimeout(() => {
+                panWrapper.classList.remove('shake', 'tossing');
+                panWrapper.style.transform = `scale(1.5) translateY(0) rotate(0deg)`;
+            }, 150);
+        }
+
+        function drawChart() {
+            if (canvas.width < 2 || canvas.height < 2) return;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.strokeStyle = '#1e293b';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for(let i=0; i<4; i++) {
+                let y = (canvas.height / 4) * i;
+                ctx.moveTo(0, y);
+                ctx.lineTo(canvas.width, y);
+            }
+            ctx.stroke();
+
+            const thresholdY = canvas.height - (movementThreshold * canvas.height * 2.5);
+            ctx.strokeStyle = '#ef4444';
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(0, thresholdY);
+            ctx.lineTo(canvas.width, thresholdY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.strokeStyle = '#22d3ee';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            const sliceWidth = canvas.width / (history.length - 1);
+            for(let i = 0; i < history.length; i++) {
+                const x = i * sliceWidth;
+                const y = canvas.height - (history[i] * canvas.height * 2.5);
+                if(i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            ctx.lineTo(canvas.width, canvas.height);
+            ctx.lineTo(0, canvas.height);
+            ctx.fillStyle = 'rgba(34, 211, 238, 0.1)';
+            ctx.fill();
+        }
+
+        function update() {
+            temperature += 0.35;
+            if (temperature > 100) temperature = 100;
+
+            tempBar.style.width = temperature + '%';
+            
+            if (temperature < 50) {
+                tempBar.style.backgroundColor = '#22d3ee'; 
+                statusBadge.innerText = 'PERFECT';
+                statusBadge.className = 'px-8 py-3 rounded-full text-xl font-black bg-green-500 shadow-green-500/20';
+                warningOverlay.classList.add('hidden');
+                smoke1.classList.remove('burning');
+                smoke2.classList.remove('burning');
+                warningText.className = 'text-slate-500';
+            } else if (temperature < 85) {
+                tempBar.style.backgroundColor = '#fbbf24'; 
+                statusBadge.innerText = 'CAUTION';
+                statusBadge.className = 'px-8 py-3 rounded-full text-xl font-black bg-yellow-500 text-slate-900';
+                warningOverlay.classList.add('hidden');
+                smoke1.classList.add('burning');
+                smoke2.classList.remove('burning');
+                warningText.className = 'text-yellow-500 font-bold';
+            } else {
+                tempBar.style.backgroundColor = '#ef4444'; 
+                statusBadge.innerText = 'BURNING';
+                statusBadge.className = 'px-8 py-3 rounded-full text-xl font-black bg-red-600 animate-pulse';
+                warningOverlay.classList.remove('hidden');
+                smoke2.classList.add('burning');
+                warningText.className = 'text-red-500 font-black animate-pulse';
+            }
+
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+            const secs = (elapsed % 60).toString().padStart(2, '0');
+            timerDisplay.innerText = `${mins}:${secs}`;
+
+            drawChart();
+            requestAnimationFrame(update);
+        }
+
+        let lastQw = 0, lastQx = 0, lastQy = 0, lastQz = 0;
+
+        function handleIMUData(line) {
+            packetCount++;
+            dataCounterEl.innerText = `${packetCount} pkts`;
+            debugRawLine.innerText = line;
+
+            if (!line.startsWith("IMU:")) return;
+            try {
+                const dataStr = line.split(":")[1];
+                const data = dataStr.split(",");
+                if (data.length < 4) return;
+
+                const qw = parseFloat(data[0]);
+                const qx = parseFloat(data[1]);
+                const qy = parseFloat(data[2]);
+                const qz = parseFloat(data[3]);
+                
+                const delta = Math.sqrt(
+                    Math.pow(qw - lastQw, 2) + 
+                    Math.pow(qx - lastQx, 2) + 
+                    Math.pow(qy - lastQy, 2) + 
+                    Math.pow(qz - lastQz, 2)
+                );
+
+                deltaValEl.innerText = delta.toFixed(4);
+                history.push(delta);
+                history.shift();
+
+                if (delta > movementThreshold) {
+                    triggerToss();
+                }
+
+                lastQw = qw; lastQx = qx; lastQy = qy; lastQz = qz;
+            } catch (e) {
+                console.error("IMU Parse Error", e);
+            }
+        }
+
+        async function connectSerial() {
+            const setupErr = document.getElementById('setup-error');
+            if (setupErr) {
+                setupErr.classList.add('hidden');
+                setupErr.textContent = '';
+            }
+            try {
+                const port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+                if (debugConsole) debugConsole.innerText = "PORT ACTIVE";
+                revealMonitor();
+
+                const reader = port.readable.getReader();
+                const decoder = new TextDecoder();
+                let buffer = "";
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value);
+                    let lines = buffer.split(/\r?\n/);
+                    buffer = lines.pop();
+
+                    for (let line of lines) {
+                        const cleanLine = line.trim();
+                        if (cleanLine) {
+                            handleIMUData(cleanLine);
+                        }
+                    }
+                }
+            } catch (e) {
+                if (debugConsole) debugConsole.innerText = "ERROR";
+                if (setupErr) {
+                    setupErr.textContent =
+                        e && e.name === 'NotFoundError'
+                            ? 'デバイスが選択されませんでした。'
+                            : 'シリアルポートを開けませんでした。ブラウザの許可と接続を確認してください。';
+                    setupErr.classList.remove('hidden');
+                }
+                console.error(e);
+            }
+        }
+
+        document.getElementById('connect-btn').addEventListener('click', connectSerial);
+        update();
+    </script>
+</body>
+</html>

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Maps API - Animated Route</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #e5e3df; }
+        
+        #viewport {
+            width: 100vw;
+            height: 100vh;
+            overflow: hidden;
+            position: relative;
+        }
+
+        #zoom-layer {
+            width: 100%;
+            height: 100%;
+            transition: transform 0.1s ease-out;
+            transform-origin: center center;
+            transform: scale(3);
+        }
+
+        #map { 
+            height: 100%; 
+            width: 100%; 
+        }
+
+        .ui-panel {
+            position: absolute;
+            top: 24px;
+            left: 24px;
+            z-index: 30;
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(4px);
+            color: #1e293b;
+            padding: 20px;
+            font-family: 'Inter', system-ui, sans-serif;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 12px;
+            min-width: 240px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+        }
+
+        .mode-badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-weight: 800;
+            font-size: 11px;
+            background: #2563eb;
+            color: white;
+            letter-spacing: 0.05em;
+            margin-bottom: 8px;
+            transition: background 0.2s;
+        }
+
+        .mode-zoom {
+            background: #db2777;
+        }
+
+        .instructions {
+            margin-top: 16px;
+            font-size: 11px;
+            color: #64748b;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="viewport">
+        <div id="zoom-layer">
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <div class="ui-panel">
+        <div id="control-mode" class="mode-badge">MODE: PAN</div>
+        <div class="text-xl font-black mb-1 uppercase tracking-tight">Navigator</div>
+        <div class="text-[10px] text-gray-500 mb-4 uppercase font-bold tracking-widest">Campus Grid Alpha</div>
+        
+        <div class="space-y-2 text-[11px] font-mono">
+            <div class="flex justify-between text-blue-600 font-bold border-t border-black/5 pt-2 mt-2">
+                <span>ZOOM SCALE:</span><span id="scale-val">3.00</span>
+            </div>
+        </div>
+
+        <div class="instructions">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-1.5 py-0.5 bg-black/5 rounded font-bold">SPACE</span>
+                <span>HOLD (0.6s): Start Mission</span>
+            </div>
+            <div class="flex items-center gap-2 mb-1">
+                <span class="px-1.5 py-0.5 bg-black/5 rounded font-bold">SPACE</span>
+                <span>TAP: Toggle PAN/ZOOM</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="px-1.5 py-0.5 bg-black/5 rounded font-bold">W,A,S,D</span>
+                <span>Control Navigation</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDoStNPl8rUlTqEsAzutNpGqQyGDyoR7as&libraries=geometry&language=en"></script>
+
+    <script>
+        (function mapModule() {
+            let map;
+            let navMarker;
+            let routePolylines = [];
+            let dottedPoly;
+            let pathCoords = [];
+            let isNavigating = false;
+            let controlMode = 'pan'; 
+            
+            let velLat = 0;
+            let velLng = 0;
+            let visualScale = 3.0; 
+            
+            const friction = 0.94;
+            const impulse = 0.0000015;
+            const scaleSpeed = 0.02;
+
+            const rawPoints = [
+                { lat: 35.715972, lng: 139.763627 }, 
+                { lat: 35.715981, lng: 139.763718 },
+                { lat: 35.716314, lng: 139.764013 }, 
+                { lat: 35.716341, lng: 139.764225 },
+                { lat: 35.716438, lng: 139.764220 }  
+            ];
+
+            const keys = {};
+            let spaceHoldStart = 0;
+            let spaceTriggered = false;
+            const HOLD_THRESHOLD = 600;
+
+            window.AppState = { currentScreen: 'map' };
+
+            function updateModeUI() {
+                const badge = document.getElementById('control-mode');
+                badge.innerText = `MODE: ${controlMode.toUpperCase()}`;
+                if (controlMode === 'zoom') {
+                    badge.classList.add('mode-zoom');
+                } else {
+                    badge.classList.remove('mode-zoom');
+                }
+            }
+
+            function setupMapLoop() {
+                function loop() {
+                    if (keys[' '] && !isNavigating && !spaceTriggered) {
+                        const elapsed = Date.now() - spaceHoldStart;
+                        if (elapsed >= HOLD_THRESHOLD) {
+                            startNavAnimation();
+                            spaceTriggered = true;
+                        }
+                    }
+
+                    if (window.AppState.currentScreen === 'map' && map) {
+                        if (controlMode === 'pan') {
+                            if (keys.w) velLat += impulse / visualScale;
+                            if (keys.s) velLat -= impulse / visualScale;
+                            if (keys.a) velLng -= impulse / visualScale;
+                            if (keys.d) velLng += impulse / visualScale;
+
+                            if (Math.abs(velLat) > 1e-10 || Math.abs(velLng) > 1e-10) {
+                                const center = map.getCenter();
+                                map.setCenter({
+                                    lat: center.lat() + velLat,
+                                    lng: center.lng() + velLng
+                                });
+                            }
+                            velLat *= friction;
+                            velLng *= friction;
+                        } else if (controlMode === 'zoom') {
+                            if (keys.w) visualScale *= (1 + scaleSpeed);
+                            if (keys.s) visualScale /= (1 + scaleSpeed);
+                            
+                            visualScale = Math.max(1.0, Math.min(visualScale, 15));
+                            document.getElementById('zoom-layer').style.transform = `scale(${visualScale})`;
+                            document.getElementById('scale-val').innerText = visualScale.toFixed(2);
+                        }
+                    }
+                    requestAnimationFrame(loop);
+                }
+                loop();
+            }
+
+            window.initMap = function initMap() {
+                const startPoint = rawPoints[0];
+
+                const mapOptions = {
+                    center: { lat: startPoint.lat, lng: startPoint.lng },
+                    zoom: 19,
+                    disableDefaultUI: true,
+                    gestureHandling: 'none',
+                    clickableIcons: false,
+                    mapTypeId: 'roadmap'
+                };
+
+                map = new google.maps.Map(document.getElementById('map'), mapOptions);
+                pathCoords = rawPoints.map(p => new google.maps.LatLng(p.lat, p.lng));
+
+                // Path background (glow effect)
+                const glowPoly = new google.maps.Polyline({
+                    path: pathCoords,
+                    strokeColor: '#2563eb',
+                    strokeOpacity: 0.2,
+                    strokeWeight: 8,
+                    visible: false,
+                    map: map
+                });
+                routePolylines.push(glowPoly);
+
+                // Animated dotted polyline
+                const lineSymbol = {
+                    path: google.maps.SymbolPath.CIRCLE,
+                    fillOpacity: 1,
+                    scale: 3,
+                    fillColor: '#2563eb',
+                    strokeWeight: 0
+                };
+
+                dottedPoly = new google.maps.Polyline({
+                    path: pathCoords,
+                    strokeOpacity: 0,
+                    visible: false,
+                    icons: [{
+                        icon: lineSymbol,
+                        offset: '0',
+                        repeat: '20px' // Increased spacing for better visibility of animation
+                    }],
+                    map: map
+                });
+                routePolylines.push(dottedPoly);
+
+                const arrowSvg = {
+                    path: "M16 4 L28 28 L16 22 L4 28 Z",
+                    fillColor: "#2563eb",
+                    fillOpacity: 1,
+                    strokeWeight: 2,
+                    strokeColor: "#ffffff",
+                    rotation: 0,
+                    scale: 1,
+                    anchor: new google.maps.Point(16, 16)
+                };
+
+                navMarker = new google.maps.Marker({
+                    position: pathCoords[0],
+                    map: map,
+                    icon: arrowSvg,
+                    visible: false,
+                    zIndex: 100
+                });
+
+                google.maps.event.addListenerOnce(map, 'idle', setupMapLoop);
+            };
+
+            function animateRouteLine() {
+                let count = 0;
+                const animLoop = () => {
+                    if (!isNavigating) return;
+                    count = (count + 1) % 200;
+                    const icons = dottedPoly.get('icons');
+                    icons[0].offset = (count / 10) + 'px';
+                    dottedPoly.set('icons', icons);
+                    requestAnimationFrame(animLoop);
+                };
+                animLoop();
+            }
+
+            function startNavAnimation() {
+                if (isNavigating) return;
+                isNavigating = true;
+                
+                routePolylines.forEach(p => p.setVisible(true));
+                navMarker.setVisible(true);
+
+                // Start the dotted line flow animation
+                animateRouteLine();
+
+                let step = 0;
+                const totalSteps = 1000; 
+
+                function animate() {
+                    if (step >= totalSteps) {
+                        // Keep path visible but stop movement flag if desired
+                        // For now, let's keep it visible
+                        isNavigating = false; 
+                        return;
+                    }
+
+                    const fraction = step / totalSteps;
+                    const pathLength = google.maps.geometry.spherical.computeLength(pathCoords);
+                    const distanceAtStep = pathLength * fraction;
+                    
+                    let currentDistance = 0;
+                    let targetLatLng = pathCoords[0];
+                    let heading = 0;
+
+                    for (let i = 0; i < pathCoords.length - 1; i++) {
+                        const segmentDist = google.maps.geometry.spherical.computeDistanceBetween(pathCoords[i], pathCoords[i+1]);
+                        if (currentDistance + segmentDist >= distanceAtStep) {
+                            const segmentFraction = (distanceAtStep - currentDistance) / segmentDist;
+                            targetLatLng = google.maps.geometry.spherical.interpolate(pathCoords[i], pathCoords[i+1], segmentFraction);
+                            heading = google.maps.geometry.spherical.computeHeading(pathCoords[i], pathCoords[i+1]);
+                            break;
+                        }
+                        currentDistance += segmentDist;
+                    }
+
+                    navMarker.setPosition(targetLatLng);
+                    const icon = navMarker.getIcon();
+                    icon.rotation = heading;
+                    navMarker.setIcon(icon);
+
+                    step += 0.3;
+                    requestAnimationFrame(animate);
+                }
+                animate();
+            }
+
+            window.addEventListener('keydown', (e) => {
+                const key = e.key.toLowerCase();
+                if (['w', 'a', 's', 'd', ' '].includes(key)) {
+                    if (key === ' ' && !keys[' ']) {
+                        spaceHoldStart = Date.now();
+                        spaceTriggered = false;
+                    }
+                    keys[key] = true;
+                }
+            });
+
+            window.addEventListener('keyup', (e) => {
+                const key = e.key.toLowerCase();
+                if (key === ' ') {
+                    const elapsed = Date.now() - spaceHoldStart;
+                    if (elapsed < HOLD_THRESHOLD && !spaceTriggered) {
+                        controlMode = (controlMode === 'pan') ? 'zoom' : 'pan';
+                        updateModeUI();
+                    }
+                    keys[' '] = false;
+                    spaceTriggered = false;
+                } else if (['w', 'a', 's', 'd'].includes(key)) {
+                    keys[key] = false;
+                }
+            });
+
+            window.onload = initMap;
+        })();
+    </script>
+</body>
+</html>
