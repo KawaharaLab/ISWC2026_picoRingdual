@@ -3,15 +3,15 @@
 #include <string.h>
 
 // ==========================================
-// 🛠️ 測定モード切り替え設定 (ここを書き換える)
-// 1: XIAO起動のみ (IMUスリープ、BLE停止)
-// 2: XIAO + IMU計算のみ (BLE停止)
-// 3: XIAO + IMU + BLE送信 (フル機能・低電力化適用)
-// 4: XIAO + BLE送信のみ [ダミー送信] (IMUスリープ)
+// 🛠️ Measurement Mode Selection (Modify here)
+// 1: XIAO Startup Only (IMU sleep, BLE disabled)
+// 2: XIAO + IMU Calculation Only (BLE disabled)
+// 3: XIAO + IMU + BLE Transmission (Full functions with low-power optimizations)
+// 4: XIAO + BLE Transmission Only [Dummy Tx] (IMU sleep)
 // ==========================================
 #define MEASURE_MODE 4
 
-/* --- ICM45605 設定値 --- */
+/* --- ICM45605 Settings --- */
 #define ICM_ADDR            0x68 
 #define SAMPLE_FREQ         25.0f   
 #define FIFO_DT             (1.0f / SAMPLE_FREQ) 
@@ -22,11 +22,11 @@
 struct Quaternion { float w, x, y, z; };
 Quaternion q = {1.0f, 0.0f, 0.0f, 0.0f};
 
-/* --- BLE 設定 --- */
+/* --- BLE Settings --- */
 BLEService imuService("19B10000-E8F2-537E-4F6C-D104768A1214");
 BLECharacteristic imuCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead | BLENotify, 9);
 
-/* プロトタイプ宣言 */
+/* Function Prototypes */
 void I2C_WriteByte(uint8_t reg, uint8_t data);
 uint8_t I2C_ReadByte(uint8_t reg);
 void I2C_ReadBytes(uint8_t reg, uint8_t *buffer, uint8_t length);
@@ -42,7 +42,7 @@ void MadgwickAHRSupdateIMU(float gx, float gy, float gz, float ax, float ay, flo
 void setup() {
   Serial.begin(9600);
   
-  // PC接続を最大3秒待つ（ログの頭欠け防止 ＆ バッテリー単体測定対応）
+  // Wait for PC connection up to 3 seconds (Prevents truncation of early logs & supports standalone battery measurement)
   unsigned long startWait = millis();
   while (!Serial && (millis() - startWait < 3000)) {
     delay(10);
@@ -57,7 +57,7 @@ void setup() {
   Serial.println("=================================");
 
   // ----------------------------------------------------
-  // 【モード1】XIAO起動のみの場合
+  // 【Mode 1】XIAO Startup Only
   // ----------------------------------------------------
   #if (MEASURE_MODE == 1)
     Wire.begin();
@@ -65,7 +65,7 @@ void setup() {
     Serial.println("[OK] Mode 1 Initialized. System entered deep sleep.");
   
   // ----------------------------------------------------
-  // 【モード2】XIAO + IMU計算のみの場合
+  // 【Mode 2】XIAO + IMU Calculation Only
   // ----------------------------------------------------
   #elif (MEASURE_MODE == 2)
     Serial.println("[MODE 2] IMU Active. BLE disabled.");
@@ -73,7 +73,7 @@ void setup() {
     ICM45605_Init();
 
   // ----------------------------------------------------
-  // 【モード3】フル機能 (XIAO + IMU + BLE送信) の場合
+  // 【Mode 3】Full Functions (XIAO + IMU + BLE Transmission)
   // ----------------------------------------------------
   #elif (MEASURE_MODE == 3)
     Serial.println("[MODE 3] Full Connection Mode (IMU + BLE).");
@@ -86,7 +86,7 @@ void setup() {
     }
     //NRF_RADIO->TXPOWER = 0x28;  
     //NRF_RADIO->TXPOWER = 0x00; // 0dBm (0x00)  
-    NRF_RADIO->TXPOWER = 0xF4; // -12dBm (2の補数表現で 0xF4)         
+    NRF_RADIO->TXPOWER = 0xF4; // -12dBm (0xF4 in 2's complement representation)         
     BLE.setConnectionInterval(40, 40); 
 
     BLE.setLocalName("XIAO_IMU_A");
@@ -101,7 +101,7 @@ void setup() {
     BLE.advertise();
 
   // ----------------------------------------------------
-  // 【モード4】BLE送信のみ [ダミー送信]
+  // 【Mode 4】BLE Transmission Only [Dummy Transmission]
   // ----------------------------------------------------
   #elif (MEASURE_MODE == 4)
     Serial.println("[MODE 4] BLE Active (Dummy Data) & IMU Deep Sleep.");
@@ -114,7 +114,7 @@ void setup() {
     }
     //NRF_RADIO->TXPOWER = 0x28; // -40dBm 
     //NRF_RADIO->TXPOWER = 0x00; // 0dBm (0x00)  
-    NRF_RADIO->TXPOWER = 0xF4; // -12dBm (2の補数表現で 0xF4)  
+    NRF_RADIO->TXPOWER = 0xF4; // -12dBm (0xF4 in 2's complement representation)  
     BLE.setConnectionInterval(40, 40);
 
     BLE.setLocalName("XIAO_IMU_A");
@@ -134,13 +134,13 @@ void setup() {
 // =========================================================================
 void loop() {
   // ----------------------------------------------------
-  // 【モード1】50ms休止するだけ
+  // 【Mode 1】Just sleep for 50ms
   // ----------------------------------------------------
   #if (MEASURE_MODE == 1)
     delay(50);
   
   // ----------------------------------------------------
-  // 【モード2】50ms周期でIMUを叩いてフィルタ計算
+  // 【Mode 2】Poll IMU and execute filter calculation every 50ms
   // ----------------------------------------------------
   #elif (MEASURE_MODE == 2)
     int32_t ax, ay, az;
@@ -149,7 +149,7 @@ void loop() {
     delay(50);
 
   // ----------------------------------------------------
-  // 【モード3】フル機能 (接続中、50ms周期で計算＆送信)
+  // 【Mode 3】Full Functions (Calculate & transmit every 50ms while connected)
   // ----------------------------------------------------
   #elif (MEASURE_MODE == 3)
     BLEDevice central = BLE.central();
@@ -179,14 +179,14 @@ void loop() {
 
           imuCharacteristic.writeValue(sendPacket, 9);
         }
-        delay(50); // 送信後にきっちり50ms待機
+        delay(50); // Wait exactly 50ms after transmission
       }
       Serial.println("Disconnected.");
       digitalWrite(LED_BUILTIN, HIGH);
     }
 
   // ----------------------------------------------------
-  // 【モード4】ダミー送信 (接続中、50ms周期で固定値送信)
+  // 【Mode 4】Dummy Transmission (Transmit fixed values every 50ms while connected)
   // ----------------------------------------------------
   #elif (MEASURE_MODE == 4)
     BLEDevice central = BLE.central();
@@ -211,7 +211,7 @@ void loop() {
 
         imuCharacteristic.writeValue(dummyPacket, 9);
         
-        delay(50); // 送信後にきっちり50ms待機
+        delay(50); // Wait exactly 50ms after transmission
       }
       Serial.println("Disconnected.");
       digitalWrite(LED_BUILTIN, HIGH);
@@ -220,7 +220,7 @@ void loop() {
 }
 
 // =========================================================================
-// 🔄 【HALからの移植】ICM45605 徹底スリープ関数
+// 🔄 Ported from HAL: ICM45605 Deep Sleep Function
 // =========================================================================
 void ICM45605_EnterDeepSleep(void) {
     uint8_t dev_id = 0;
@@ -228,40 +228,40 @@ void ICM45605_EnterDeepSleep(void) {
 
     Serial.println("\r\n--- ICM-45605 Deep Sleep Start ---");
 
-    // 1. WHO_AM_I 確認
+    // 1. Verify WHO_AM_I
     dev_id = I2C_ReadByte(0x72);
     Serial.print("[OK] Device ID: 0x");
     Serial.println(dev_id, HEX);
 
-    // 2. ソフトリセット
+    // 2. Software Reset
     I2C_WriteByte(0x7F, 0x02);
     delay(50); 
 
-    // --- 内部プルアップの全解除 (IPREG_BAR 領域) ---
+    // --- Disabling all internal pull-ups (IPREG_BAR area) ---
     // Bank 0x00, Address 0x3A (AP_CS, AP_SCLK)
     I2C_WriteByte(0x7C, 0x00);
     I2C_WriteByte(0x7D, 0x3A);
     read_val = I2C_ReadByte(0x7E);
-    read_val &= ~(0x40 | 0x08); // bit6: SCLK(SCL), bit3: CS をOFF
+    read_val &= ~(0x40 | 0x08); // Turn OFF bit6: SCLK(SCL), bit3: CS
     I2C_WriteByte(0x7E, read_val);
 
     // Bank 0x00, Address 0x3B (AP_SDO, AP_SDI)
     I2C_WriteByte(0x7D, 0x3B);
     read_val = I2C_ReadByte(0x7E);
-    read_val &= ~(0x10 | 0x02); // bit4: SDO(AD0), bit1: SDI(SDA) をOFF
+    read_val &= ~(0x10 | 0x02); // Turn OFF bit4: SDO(AD0), bit1: SDI(SDA)
     I2C_WriteByte(0x7E, read_val);
 
     // PWR_MGMT0 (0x10): GYRO_MODE=00(OFF), ACCEL_MODE=00(OFF)
     I2C_WriteByte(0x10, 0x00);
 
-    // PWR_MGMT_AUX1 (0x54): 補助インターフェースも確実にOFFにする
+    // PWR_MGMT_AUX1 (0x54): Ensure auxiliary interface is also disabled
     I2C_WriteByte(0x54, 0x00);
 
     Serial.println("[OK] Sensors & AUX disabled. Internal pull-ups cleared.");
 }
 
 // =========================================================================
-// I2C 読み書き用ヘルパー関数
+// Helper Functions for I2C Read/Write
 // =========================================================================
 void I2C_WriteByte(uint8_t reg, uint8_t data) {
   Wire.beginTransmission(ICM_ADDR);
@@ -291,41 +291,41 @@ void I2C_ReadBytes(uint8_t reg, uint8_t *buffer, uint8_t length) {
 }
 
 // =========================================================================
-// ICM45605 通常初期化
+// ICM45605 Standard Initialization
 // =========================================================================
 void ICM45605_Init(void) {
     uint8_t read_val;
 
-    // 通常起動時も、まずはプルアップ解除を施して漏れ電流をカット
+    // Even during normal startup, first clear the pull-ups to eliminate leakage current
     I2C_WriteByte(0x7C, 0x00); I2C_WriteByte(0x7D, 0x3A);
     read_val = I2C_ReadByte(0x7E); read_val &= ~(0x40 | 0x08); I2C_WriteByte(0x7E, read_val);
     I2C_WriteByte(0x7D, 0x3B);
     read_val = I2C_ReadByte(0x7E); read_val &= ~(0x10 | 0x02); I2C_WriteByte(0x7E, read_val);
 
-    // 3. ODR設定 (25Hz)
+    // 3. Configure ODR (25Hz)
     I2C_WriteByte(0x1B, 0x4B); 
     I2C_WriteByte(0x1C, 0x4B); 
 
-    // 4. AULPモード 
+    // 4. AULP Mode 
     I2C_WriteByte(0x7C, 0x00); I2C_WriteByte(0x7D, 0x58);
     read_val = I2C_ReadByte(0x7E); read_val &= ~(0x10); I2C_WriteByte(0x7E, read_val);
 
-    // 5. 平均化フィルタ 1x 
+    // 5. Averaging Filter 1x 
     I2C_WriteByte(0x7C, 0x00); I2C_WriteByte(0x7D, 0x81);
     read_val = I2C_ReadByte(0x7E); read_val &= 0xF0; I2C_WriteByte(0x7E, read_val);
     I2C_WriteByte(0x7C, 0x00); I2C_WriteByte(0x7D, 0xAA);
     read_val = I2C_ReadByte(0x7E); read_val &= 0xE1; I2C_WriteByte(0x7E, read_val);
 
-    // 6. FIFO構成
+    // 6. FIFO Configuration
     I2C_WriteByte(0x1D, 0x40); 
     I2C_WriteByte(0x21, 0x07);
 
-    // 7. 電源有効化
+    // 7. Enable Power
     I2C_WriteByte(0x10, 0x0A);
 }
 
 // =========================================================================
-// ICM45605 読み取り ＆ フィルタ更新処理 (Arduino版)
+// ICM45605 Read & Filter Update Process (Arduino Version)
 // =========================================================================
 bool ICM45605_Read_Process(int32_t *ax_mg, int32_t *ay_mg, int32_t *az_mg, int16_t *gx_raw, int16_t *gy_raw, int16_t *gz_raw) {
     uint8_t count_buf[2];
@@ -362,7 +362,7 @@ bool ICM45605_Read_Process(int32_t *ax_mg, int32_t *ay_mg, int32_t *az_mg, int16
 }
 
 // =========================================================================
-// Madgwick フィルタ 計算関数
+// Madgwick Filter Calculation Function
 // =========================================================================
 float invSqrt(float x) {
     float halfx = 0.5f * x;

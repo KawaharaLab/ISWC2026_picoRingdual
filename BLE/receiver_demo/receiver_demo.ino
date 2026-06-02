@@ -1,10 +1,10 @@
 #include <ArduinoBLE.h>
-#include <string.h> // memcpy用
+#include <string.h> // For memcpy
 
 const char* targetServiceUuid = "19B10000-E8F2-537E-4F6C-D104768A1214";
 const char* targetCharUuid    = "19B10001-E8F2-537E-4F6C-D104768A1214";
 
-// プロトタイプ宣言
+// Function prototypes
 void ParseAndPrintImuData(uint8_t* buffer);
 void explorePeripheral(BLEDevice peripheral);
 
@@ -53,14 +53,14 @@ void explorePeripheral(BLEDevice peripheral) {
     return;
   }
 
-  // つながっている間のメインループ
+  // Main loop while connected
   while (peripheral.connected()) {
     if (imuCharacteristic.valueUpdated()) {
       
-      // 【変更】9バイトの受信用バッファを用意
+      // Prepare a 9-byte buffer for reception
       uint8_t byteBuffer[9];
       
-      // 9バイトきっちり届いたら、提示された解析関数を叩く
+      // Call the parsing function if exactly 9 bytes are received
       if (imuCharacteristic.readValue(byteBuffer, 9) == 9) {
         ParseAndPrintImuData(byteBuffer);
       }
@@ -69,14 +69,14 @@ void explorePeripheral(BLEDevice peripheral) {
 }
 
 // =========================================================================
-// 提示されたパケット解析＆Unity用シリアル出力関数
+// Packet Parsing & Serial Output Function for Unity
 // =========================================================================
 void ParseAndPrintImuData(uint8_t* buffer) {
   int16_t w_raw, x_raw, y_raw, z_raw;
   uint8_t gpio_byte;
   int idx = 0;
 
-  // 1. バイナリデータの取り出し (合計9バイト)
+  // 1. Extract binary data (9 bytes in total)
   memcpy(&w_raw, &buffer[idx], 2); idx += 2;
   memcpy(&x_raw, &buffer[idx], 2); idx += 2;
   memcpy(&y_raw, &buffer[idx], 2); idx += 2;
@@ -85,13 +85,13 @@ void ParseAndPrintImuData(uint8_t* buffer) {
   // GPIO Byte (1 byte)
   gpio_byte = buffer[idx];
 
-  // 2. 圧縮データの復元 (30000.0f で割って float に戻す)
+  // 2. Decompress data (Divide by 30000.0f to restore to float)
   float w = (float)w_raw / 30000.0f;
   float x = (float)x_raw / 30000.0f;
   float y = (float)y_raw / 30000.0f;
   float z = (float)z_raw / 30000.0f;
 
-  /* 3. Unity用シリアル出力 */
+  /* 3. Serial output for Unity */
   Serial.print("IMU:");
   Serial.print(w, 4); Serial.print(",");
   Serial.print(x, 4); Serial.print(",");
